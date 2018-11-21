@@ -27,9 +27,14 @@ main =
 type alias Model =
     { board : Board
     , score : Int
-    , over : Bool
-    , won : Bool
+    , state : GameState
     }
+
+
+type GameState
+    = Playing
+    | Won
+    | Over
 
 
 type alias Board =
@@ -65,8 +70,7 @@ init _ =
     in
     ( { board = emptyBoard
       , score = 0
-      , over = False
-      , won = False
+      , state = Playing
       }
     , randomPositionedTiles 2 emptyBoard
         |> Random.generate PutMany
@@ -115,8 +119,15 @@ update msg model =
             in
             ( { model
                 | board = newBoard
-                , over = model.over || stuck newBoard
-                , won = model.won || won newBoard
+                , state =
+                    if stuck newBoard then
+                        Over
+
+                    else if won newBoard then
+                        Won
+
+                    else
+                        Playing
               }
             , Cmd.none
             )
@@ -356,19 +367,17 @@ view model =
         , div [] [ viewScore model.score ]
         , div [] [ viewBoard model.board ]
         , div []
-            (if model.over then
-                [ text "Game over!" ]
+            [ text <|
+                case model.state of
+                    Over ->
+                        "Game over!"
 
-             else
-                []
-            )
-        , div []
-            (if model.won then
-                [ text "You win!" ]
+                    Won ->
+                        "You win!"
 
-             else
-                []
-            )
+                    Playing ->
+                        ""
+            ]
         ]
 
 
