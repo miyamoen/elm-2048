@@ -59,7 +59,6 @@ type Direction
     | Right
     | Up
     | Down
-    | Other
 
 
 init : () -> ( Model, Cmd Msg )
@@ -259,9 +258,6 @@ slideListBoard direction board =
                 |> slideListBoard Right
                 |> Tuple.mapFirst transpose
 
-        Other ->
-            ( board, 0 )
-
 
 emptyPositionList : Board -> List Position
 emptyPositionList board =
@@ -460,23 +456,23 @@ subscriptions model =
 
 keyDecoder : Decode.Decoder Direction
 keyDecoder =
-    Decode.map toDirection (Decode.field "key" Decode.string)
+    Decode.andThen directionDecoder (Decode.field "key" Decode.string)
 
 
-toDirection : String -> Direction
-toDirection string =
+directionDecoder : String -> Decode.Decoder Direction
+directionDecoder string =
     case string of
         "ArrowLeft" ->
-            Left
+            Decode.succeed Left
 
         "ArrowRight" ->
-            Right
+            Decode.succeed Right
 
         "ArrowUp" ->
-            Up
+            Decode.succeed Up
 
         "ArrowDown" ->
-            Down
+            Decode.succeed Down
 
         _ ->
-            Other
+            Decode.fail "NoControlKey"
