@@ -147,65 +147,57 @@ setBoard ( i, j ) cell board =
         |> Maybe.withDefault board
 
 
-mergeCell : Cell -> Cell -> ( Cell, Int )
-mergeCell cellX cellY =
-    case cellX of
-        Tile x ->
-            case cellY of
-                Tile y ->
-                    ( Tile (x + y), x + y )
+type Accumulator
+    = Waiting Int (List Int) Int
+    | Done (List Int) Int
 
-                Empty ->
-                    ( Empty, 0 )
+
+accumulate : Int -> Accumulator -> Accumulator
+accumulate cell acc =
+    case acc of
+        Waiting waiting done score ->
+            if waiting == cell then
+                Done (cell * 2 :: done) (score + cell * 2)
+
+            else
+                Waiting cell (waiting :: done) score
+
+        Done done score ->
+            Waiting cell done score
+
+
+cellToInt : Cell -> Maybe Int
+cellToInt cell =
+    case cell of
+        Tile num ->
+            Just num
 
         Empty ->
-            ( Empty, 0 )
+            Nothing
 
 
-type Accumulator
-    = Waiting Cell (List Cell) Int
-    | Done (List Cell) Int
-
-
-accumulate : Cell -> Accumulator -> Accumulator
-accumulate cell acc =
-    if cell == Empty then
-        acc
-
-    else
+accToCells : Accumulator -> ( List Cell, Int )
+accToCells acc =
+    Tuple.mapFirst (List.map Tile) <|
         case acc of
-            Waiting waiting done score ->
-                if waiting == cell then
-                    let
-                        ( merged, increase ) =
-                            mergeCell cell waiting
-                    in
-                    Done (merged :: done) (score + increase)
+            Waiting waiting done s ->
+                ( waiting :: done, s )
 
-                else
-                    Waiting cell (waiting :: done) score
+            Done done s ->
+                ( done, s )
 
-            Done done score ->
-                Waiting cell done score
+
+fillEmpty : Int -> List Cell -> List Cell
+fillEmpty length row =
+    List.repeat (length - List.length row) Empty ++ row
 
 
 slideRow : List Cell -> ( List Cell, Int )
 slideRow row =
-    let
-        acc =
-            List.foldr accumulate (Done [] 0) row
-
-        ( newRow, score ) =
-            case acc of
-                Waiting waiting done s ->
-                    ( waiting :: done, s )
-
-                Done done s ->
-                    ( done, s )
-    in
-    ( List.repeat (List.length row - List.length newRow) Empty ++ newRow
-    , score
-    )
+    List.filterMap cellToInt row
+        |> List.foldr accumulate (Done [] 0)
+        |> accToCells
+        |> Tuple.mapFirst (fillEmpty (List.length row))
 
 
 toListBoard : Board -> List (List Cell)
