@@ -3,11 +3,17 @@ module Main exposing (main)
 import Array exposing (Array)
 import Browser
 import Browser.Events exposing (onKeyDown)
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (onClick)
+import Dict exposing (Dict)
+import Element exposing (..)
+import Element.Background as Background
+import Element.Border as Border
+import Element.Font as Font
+import Html exposing (Html)
 import Json.Decode as Decode
 import Random
+import Random.List
+import Random.Set
+import Set exposing (Set)
 
 
 main : Program () Model Msg
@@ -26,6 +32,7 @@ main =
 
 type alias Model =
     { board : Board
+    , size : ( Int, Int )
     , score : Int
     , state : GameState
     }
@@ -38,16 +45,17 @@ type GameState
 
 
 type alias Board =
-    Array Row
+    List AnimationCell
 
 
-type alias Row =
-    Array Cell
+type alias Cell =
+    { position : Position, num : Int }
 
 
-type Cell
-    = Tile Int
-    | Empty
+type AnimationCell
+    = ShowUpCell Cell
+    | MoveCell Cell Position
+    | MergeCell Cell ( Position, Position )
 
 
 type alias Position =
@@ -63,15 +71,12 @@ type Direction
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    let
-        emptyBoard =
-            Array.repeat 4 <| Array.repeat 4 <| Empty
-    in
-    ( { board = emptyBoard
+    ( { board = []
+      , size = ( 4, 4 )
       , score = 0
       , state = Playing
       }
-    , randomPositionedTiles 2 emptyBoard
+    , randomCells 2 ( 4, 4 ) []
         |> Random.generate PutMany
     )
 
@@ -82,8 +87,8 @@ init _ =
 
 type Msg
     = Slide Direction
-    | Put ( Position, Cell )
-    | PutMany (List ( Position, Cell ))
+    | Put Cell
+    | PutMany (List Cell)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -91,18 +96,18 @@ update msg model =
     case msg of
         Slide direction ->
             let
-                ( slidedBoard, increase ) =
-                    slideBoard direction model.board
+                slidedBoard =
+                    slideBoard model.size direction model.board
 
-                cmd =
-                    if model.board == slidedBoard then
-                        Cmd.none
+                ( increase, cmd ) =
+                    if boardEqual model.board slidedBoard then
+                        ( 0, Cmd.none )
 
                     else
-                        randomPosition slidedBoard
-                            |> Maybe.map (\position -> Random.pair position randomTile)
-                            |> Maybe.map (Random.generate Put)
-                            |> Maybe.withDefault Cmd.none
+                        ( countScore model.board
+                        , randomCell model.size slidedBoard
+                            |> Random.generate Put
+                        )
             in
             ( { model
                 | board = slidedBoard
@@ -111,15 +116,15 @@ update msg model =
             , cmd
             )
 
-        Put ( position, cell ) ->
+        Put cell ->
             let
                 newBoard =
-                    setBoard position cell model.board
+                    ShowUpCell cell :: model.board
             in
             ( { model
                 | board = newBoard
                 , state =
-                    if stuck newBoard then
+                    if stuck model.size newBoard then
                         Over
 
                     else if won newBoard then
@@ -131,215 +136,223 @@ update msg model =
             , Cmd.none
             )
 
-        PutMany list ->
+        PutMany cells ->
             ( { model
-                | board = List.foldl (\( position, cell ) -> setBoard position cell) model.board list
+                | board = List.map ShowUpCell cells ++ model.board
               }
             , Cmd.none
             )
 
 
-setBoard : Position -> Cell -> Board -> Board
-setBoard ( i, j ) cell board =
-    Array.get i board
-        |> Maybe.map (\oldRow -> Array.set j cell oldRow)
-        |> Maybe.map (\newRow -> Array.set i newRow board)
-        |> Maybe.withDefault board
+accumulate : Cell -> List AnimationCell -> List AnimationCell
+accumulate cell cells =
+    case cells of
+        (MergeCell _ _) :: _ ->
+            MoveCell cell cell.position :: cells
 
-
-type Accumulator
-    = Waiting Int (List Int) Int
-    | Done (List Int) Int
-
-
-accumulate : Int -> Accumulator -> Accumulator
-accumulate cell acc =
-    case acc of
-        Waiting waiting done score ->
-            if waiting == cell then
-                Done (cell * 2 :: done) (score + cell * 2)
+        (MoveCell nearest _) :: rest ->
+            if nearest.num == cell.num then
+                MergeCell { cell | num = cell.num * 2 }
+                    ( cell.position, nearest.position )
+                    :: rest
 
             else
-                Waiting cell (waiting :: done) score
+                MoveCell cell cell.position :: cells
 
-        Done done score ->
-            Waiting cell done score
+        (ShowUpCell _) :: _ ->
+            MoveCell cell cell.position :: cells
 
-
-cellToInt : Cell -> Maybe Int
-cellToInt cell =
-    case cell of
-        Tile num ->
-            Just num
-
-        Empty ->
-            Nothing
+        [] ->
+            [ MoveCell cell cell.position ]
 
 
-accToCells : Accumulator -> ( List Cell, Int )
-accToCells acc =
-    Tuple.mapFirst (List.map Tile) <|
-        case acc of
-            Waiting waiting done s ->
-                ( waiting :: done, s )
-
-            Done done s ->
-                ( done, s )
-
-
-fillEmpty : Int -> List Cell -> List Cell
-fillEmpty length row =
-    List.repeat (length - List.length row) Empty ++ row
-
-
-slideRow : List Cell -> ( List Cell, Int )
-slideRow row =
-    List.filterMap cellToInt row
-        |> List.foldr accumulate (Done [] 0)
-        |> accToCells
-        |> Tuple.mapFirst (fillEmpty (List.length row))
-
-
-toListBoard : Board -> List (List Cell)
-toListBoard board =
-    Array.toList <| Array.map Array.toList board
-
-
-fromListBoard : List (List Cell) -> Board
-fromListBoard board =
-    Array.fromList <| List.map Array.fromList board
-
-
-transpose : List (List Cell) -> List (List Cell)
-transpose matrix =
-    List.foldr (List.map2 (::)) (List.repeat (List.length matrix) []) matrix
-
-
-slideBoard : Direction -> Board -> ( Board, Int )
-slideBoard direction board =
-    board
-        |> toListBoard
-        |> slideListBoard direction
-        |> Tuple.mapFirst fromListBoard
-
-
-slideListBoard : Direction -> List (List Cell) -> ( List (List Cell), Int )
-slideListBoard direction board =
+slideBoard : ( Int, Int ) -> Direction -> Board -> Board
+slideBoard ( width, height ) direction board =
     case direction of
         Left ->
-            board
-                |> List.map List.reverse
-                |> slideListBoard Right
-                |> Tuple.mapFirst (List.map List.reverse)
+            List.concatMap
+                (\j ->
+                    getRow j board
+                        |> List.foldl accumulate []
+                        |> List.reverse
+                        |> List.indexedMap (\i cell -> replacePosition ( i, j ) cell)
+                )
+                (List.range 0 (height - 1))
 
         Right ->
-            board
-                |> List.map slideRow
-                |> List.unzip
-                |> Tuple.mapSecond List.sum
+            List.concatMap
+                (\j ->
+                    getRow j board
+                        |> List.foldr accumulate []
+                        |> List.reverse
+                        |> List.indexedMap (\i cell -> replacePosition ( width - i - 1, j ) cell)
+                )
+                (List.range 0 (height - 1))
 
         Up ->
-            board
-                |> transpose
-                |> slideListBoard Left
-                |> Tuple.mapFirst transpose
+            List.concatMap
+                (\i ->
+                    getColumn i board
+                        |> List.foldl accumulate []
+                        |> List.reverse
+                        |> List.indexedMap (\j cell -> replacePosition ( i, j ) cell)
+                )
+                (List.range 0 (width - 1))
 
         Down ->
-            board
-                |> transpose
-                |> slideListBoard Right
-                |> Tuple.mapFirst transpose
+            List.concatMap
+                (\i ->
+                    getColumn i board
+                        |> List.foldr accumulate []
+                        |> List.reverse
+                        |> List.indexedMap (\j cell -> replacePosition ( i, height - j - 1 ) cell)
+                )
+                (List.range 0 (width - 1))
 
 
-emptyPositionList : Board -> List Position
-emptyPositionList board =
-    board
-        |> Array.map Array.toList
-        |> Array.toList
-        |> List.indexedMap (\i -> List.indexedMap (\j -> Tuple.pair ( i, j )))
-        |> List.concat
-        |> List.filterMap
-            (\( position, cell ) ->
-                case cell of
-                    Tile n ->
-                        Nothing
+getRow : Int -> Board -> List Cell
+getRow index board =
+    List.map getCell board
+        |> List.filter (.position >> Tuple.second >> (==) index)
+        |> List.sortBy .position
 
-                    Empty ->
-                        Just position
+
+getColumn : Int -> Board -> List Cell
+getColumn index board =
+    List.map getCell board
+        |> List.filter (.position >> Tuple.first >> (==) index)
+        |> List.sortBy .position
+
+
+getCell : AnimationCell -> Cell
+getCell animationCell =
+    case animationCell of
+        ShowUpCell cell ->
+            cell
+
+        MoveCell cell _ ->
+            cell
+
+        MergeCell cell _ ->
+            cell
+
+
+replacePosition : Position -> AnimationCell -> AnimationCell
+replacePosition position animationCell =
+    case animationCell of
+        ShowUpCell cell ->
+            ShowUpCell { cell | position = position }
+
+        MoveCell cell old ->
+            MoveCell { cell | position = position } old
+
+        MergeCell cell olds ->
+            MergeCell { cell | position = position } olds
+
+
+emptyPositionList : ( Int, Int ) -> Board -> List Position
+emptyPositionList ( width, height ) board =
+    List.map (getCell >> .position) board
+        |> Set.fromList
+        |> Set.diff
+            (List.range 0 (height - 1)
+                |> List.concatMap
+                    (\j ->
+                        List.range 0 (width - 1)
+                            |> List.map (\i -> ( i, j ))
+                    )
+                |> Set.fromList
             )
+        |> Set.toList
 
 
-randomPosition : Board -> Maybe (Random.Generator Position)
-randomPosition board =
+boardEqual : Board -> Board -> Bool
+boardEqual a b =
+    (List.length a == List.length b)
+        && (toDict a == toDict b)
+
+
+toDict : Board -> Dict Position Int
+toDict board =
+    List.map (getCell >> (\{ num, position } -> ( position, num ))) board
+        |> Dict.fromList
+
+
+
+-- Random
+
+
+randomEmptyPositions : Int -> ( Int, Int ) -> Board -> Random.Generator (List Position)
+randomEmptyPositions length size board =
+    emptyPositionList size board
+        |> Random.List.shuffle
+        |> Random.map (List.take length)
+
+
+randomEmptyPosition : ( Int, Int ) -> Board -> Random.Generator Position
+randomEmptyPosition size board =
+    Random.Set.notInSet (List.map (getCell >> .position) board |> Set.fromList) <|
+        randomPosition size
+
+
+randomPosition : ( Int, Int ) -> Random.Generator Position
+randomPosition ( width, height ) =
+    Random.pair (Random.int 0 <| width - 1) (Random.int 0 <| height - 1)
+
+
+randomNum : Random.Generator Int
+randomNum =
+    Random.uniform 2 [ 4 ]
+
+
+randomCells : Int -> ( Int, Int ) -> Board -> Random.Generator (List Cell)
+randomCells n size board =
     let
         positionList =
-            emptyPositionList board
+            randomEmptyPositions n size board
+
+        numList =
+            Random.list n randomNum
     in
-    case positionList of
-        [] ->
-            Nothing
-
-        head :: tail ->
-            Just (Random.uniform head tail)
+    Random.map2 (List.map2 Cell) positionList numList
 
 
-randomTile : Random.Generator Cell
-randomTile =
-    Random.uniform (Tile 2) [ Tile 4 ]
+randomCell : ( Int, Int ) -> Board -> Random.Generator Cell
+randomCell size board =
+    Random.map2 Cell (randomEmptyPosition size board) randomNum
 
 
-randomPositionedTiles : Int -> Board -> Random.Generator (List ( Position, Cell ))
-randomPositionedTiles n board =
-    let
-        positionList =
-            sample n (emptyPositionList board)
 
-        tileList =
-            Random.list n randomTile
-    in
-    Random.map2 (List.map2 Tuple.pair) positionList tileList
+-- judge
 
 
-sample : Int -> List a -> Random.Generator (List a)
-sample n list =
-    if n <= 0 then
-        Random.constant []
-
-    else
-        let
-            indexedList =
-                List.indexedMap Tuple.pair list
-        in
-        case indexedList of
-            [] ->
-                Random.constant []
-
-            head :: tail ->
-                Random.uniform head tail
-                    |> Random.andThen
-                        (\( index, element ) ->
-                            let
-                                omitted =
-                                    List.take index list ++ List.drop (index + 1) list
-                            in
-                            Random.map ((::) element) (sample (n - 1) omitted)
-                        )
+countScore : Board -> Int
+countScore board =
+    List.map scoreHelp board
+        |> List.sum
 
 
-stuck : Board -> Bool
-stuck board =
-    [ Left, Right, Up, Down ]
-        |> List.all
-            (\direction ->
-                Tuple.first (slideBoard direction board)
-                    == board
-            )
+scoreHelp : AnimationCell -> Int
+scoreHelp animationCell =
+    case animationCell of
+        MergeCell { num } _ ->
+            num
+
+        _ ->
+            0
+
+
+stuck : ( Int, Int ) -> Board -> Bool
+stuck (( w, h ) as size) board =
+    (List.length board == w * h)
+        && List.all
+            (\direction -> boardEqual board <| slideBoard size direction board)
+            [ Left, Right, Up, Down ]
 
 
 won : Board -> Bool
 won board =
-    toListBoard board
-        |> List.any (List.any ((==) (Tile 2048)))
+    List.any (getCell >> .num >> (==) 2048) board
 
 
 
@@ -348,91 +361,85 @@ won board =
 
 view : Model -> Html Msg
 view model =
-    div
-        [ style "font-family" "Consolas"
-        ]
-        [ h1 [] [ text "Hello" ]
-        , div [] [ viewScore model.score ]
-        , div [] [ viewBoard model.board ]
-        , div []
-            [ text <|
-                case model.state of
-                    Over ->
-                        "Game over!"
-
-                    Won ->
-                        "You win!"
-
-                    Playing ->
-                        ""
+    layout [ Font.family [ Font.typeface "Consolas" ] ] <|
+        column [ spacing 10, padding 10 ]
+            [ viewScore model.score
+            , viewBoard model
+            , viewResult model.state
             ]
-        ]
 
 
-viewBoard : Board -> Html Msg
-viewBoard board =
-    div
-        [ style "display" "inline-block"
-        , style "margin" "10px"
-        , style "padding" "5px"
-        , style "border-radius" "10px"
-        , style "background-color" "#bbb"
+viewBoard : Model -> Element msg
+viewBoard { size, board } =
+    let
+        ( w, h ) =
+            size
+    in
+    column
+        ([ Border.rounded 10
+         , Background.color <| rgb255 187 187 187
+         , width <| px <| w * 50 + (w - 1) * 5 + 20
+         , height <| px <| h * 50 + (h - 1) * 5 + 20
+         ]
+            ++ List.map (viewAnimationCell >> inFront) board
+        )
+        []
+
+
+viewAnimationCell : AnimationCell -> Element msg
+viewAnimationCell animationCell =
+    let
+        cell =
+            getCell animationCell
+
+        ( i, j ) =
+            cell.position
+    in
+    el
+        [ moveRight <| toFloat <| i * 50 + i * 5 + 10
+        , moveDown <| toFloat <| j * 50 + j * 5 + 10
         ]
     <|
-        Array.toList (Array.map viewRow board)
+        viewCell cell
 
 
-viewRow : Row -> Html Msg
-viewRow row =
-    div [] <|
-        Array.toList (Array.map viewCell row)
-
-
-viewCell : Cell -> Html Msg
-viewCell cell =
-    let
-        cellStyle =
-            [ style "display" "inline-block"
-            , style "margin" "5px"
-            , style "width" "50px"
-            , style "height" "50px"
-            , style "line-height" "50px"
-            , style "border-radius" "5px"
-            , style "font-size" "24px"
-            , style "text-align" "center"
-            , style "vertical-align" "middle"
-            ]
-    in
-    case cell of
-        Tile number ->
-            div
-                (cellStyle
-                    ++ [ style "background-color" "#eee"
-                       ]
-                )
-                [ text (String.fromInt number)
-                ]
-
-        Empty ->
-            div
-                (cellStyle
-                    ++ [ style "background-color" "#ccc"
-                       ]
-                )
-                []
-
-
-viewScore : Int -> Html Msg
-viewScore score =
-    div
-        [ style "display" "inline-block"
-        , style "margin" "10px"
-        , style "padding" "10px"
-        , style "border-radius" "10px"
-        , style "font-size" "20px"
-        , style "background-color" "#bbb"
+viewCell : Cell -> Element msg
+viewCell { num } =
+    column
+        [ width <| px 50
+        , height <| px 50
+        , Border.rounded 5
+        , Font.size 24
+        , Background.color <| rgb255 238 238 238
         ]
-        [ text <| "Score: " ++ String.fromInt score ]
+        [ el [ centerX, centerY ] <| text (String.fromInt num) ]
+
+
+viewResult : GameState -> Element msg
+viewResult state =
+    case state of
+        Won ->
+            text "You win!"
+
+        Over ->
+            text "Game over!"
+
+        Playing ->
+            none
+
+
+viewScore : Int -> Element msg
+viewScore score =
+    el
+        [ Border.rounded 10
+        , padding 10
+        , Font.size 20
+        , Background.color <| rgb255 187 187 187
+        ]
+    <|
+        text <|
+            "Score: "
+                ++ String.fromInt score
 
 
 
