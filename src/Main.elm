@@ -352,7 +352,7 @@ stuck (( w, h ) as size) board =
 
 won : Board -> Bool
 won board =
-    List.any (getCell >> .num >> (==) 2048) board
+    List.any (getCell >> .num >> (<=) 64) board
 
 
 
@@ -362,7 +362,7 @@ won board =
 view : Model -> Html Msg
 view model =
     layout [ Font.family [ Font.typeface "Consolas" ] ] <|
-        column [ spacing 10, padding 10 ]
+        column [ spacing 20, padding 20 ]
             [ viewScore model.score
             , viewBoard model
             , viewResult model.state
@@ -380,10 +380,13 @@ viewBoard { size, board } =
          , Background.color <| rgb255 187 187 187
          , width <| px <| w * 50 + (w - 1) * 5 + 20
          , height <| px <| h * 50 + (h - 1) * 5 + 20
+         , padding 10
+         , spacing 5
          ]
             ++ List.map (viewAnimationCell >> inFront) board
         )
-        []
+    <|
+        viewEmptyCells size
 
 
 viewAnimationCell : AnimationCell -> Element msg
@@ -413,6 +416,20 @@ viewCell { num } =
         , Background.color <| rgb255 238 238 238
         ]
         [ el [ centerX, centerY ] <| text (String.fromInt num) ]
+
+
+viewEmptyCells : ( Int, Int ) -> List (Element msg)
+viewEmptyCells ( w, h ) =
+    List.repeat h <|
+        row [ spacing 5 ] <|
+            List.repeat w <|
+                el
+                    [ width <| px 50
+                    , height <| px 50
+                    , Border.rounded 5
+                    , Background.color <| rgb255 204 204 204
+                    ]
+                    none
 
 
 viewResult : GameState -> Element msg
