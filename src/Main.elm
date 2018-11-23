@@ -413,7 +413,49 @@ viewCell { num } =
         , height <| px 50
         , Border.rounded 5
         , Font.size 24
-        , Background.color <| rgb255 238 238 238
+        , Background.color <|
+            case num of
+                2 ->
+                    rgb255 238 238 238
+
+                4 ->
+                    rgb255 248 252 223
+
+                8 ->
+                    rgb255 243 190 152
+
+                16 ->
+                    rgb255 234 162 109
+
+                32 ->
+                    rgb255 245 156 135
+
+                64 ->
+                    rgb255 255 97 61
+
+                128 ->
+                    rgb255 238 229 161
+
+                256 ->
+                    rgb255 245 231 132
+
+                512 ->
+                    rgb255 228 214 111
+
+                1024 ->
+                    rgb255 224 195 88
+
+                2048 ->
+                    rgb255 196 224 88
+
+                _ ->
+                    rgb255 100 100 100
+        , Font.color <|
+            if num == 2 || num == 4 then
+                rgb255 34 34 34
+
+            else
+                rgb255 250 250 250
         ]
         [ el [ centerX, centerY ] <| text (String.fromInt num) ]
 
