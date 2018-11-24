@@ -8,7 +8,10 @@ import Element exposing (..)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
+import Element.Keyed as Keyed
+import Element.Lazy exposing (lazy, lazy2, lazy4, lazy5)
 import Html exposing (Html)
+import Html.Attributes
 import Json.Decode as Decode
 import Random
 import Random.List
@@ -18,9 +21,9 @@ import Set exposing (Set)
 
 main : Program () Model Msg
 main =
-    Browser.element
+    Browser.document
         { init = init
-        , view = view
+        , view = \model -> { title = "Elm 2048", body = [ view model ] }
         , update = update
         , subscriptions = subscriptions
         }
@@ -35,6 +38,7 @@ type alias Model =
     , size : ( Int, Int )
     , score : Int
     , state : GameState
+    , nextId : Int
     }
 
 
@@ -49,7 +53,7 @@ type alias Board =
 
 
 type alias Cell =
-    { position : Position, num : Int }
+    { position : Position, num : Int, id : String }
 
 
 type AnimationCell
@@ -75,6 +79,7 @@ init _ =
       , size = ( 4, 4 )
       , score = 0
       , state = Playing
+      , nextId = 0
       }
     , randomCells 2 ( 4, 4 ) []
         |> Random.generate PutMany
@@ -87,8 +92,8 @@ init _ =
 
 type Msg
     = Slide Direction
-    | Put Cell
-    | PutMany (List Cell)
+    | Put (String -> Cell)
+    | PutMany (List (String -> Cell))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -116,13 +121,15 @@ update msg model =
             , cmd
             )
 
-        Put cell ->
+        Put toCell ->
             let
                 newBoard =
-                    ShowUpCell cell :: model.board
+                    ShowUpCell (toCell <| String.fromInt model.nextId)
+                        :: model.board
             in
             ( { model
                 | board = newBoard
+                , nextId = model.nextId + 1
                 , state =
                     if stuck model.size newBoard then
                         Over
@@ -136,9 +143,19 @@ update msg model =
             , Cmd.none
             )
 
-        PutMany cells ->
+        PutMany toCells ->
             ( { model
-                | board = List.map ShowUpCell cells ++ model.board
+                | board =
+                    List.indexedMap
+                        (\i toCell ->
+                            (model.nextId + i)
+                                |> String.fromInt
+                                |> toCell
+                                |> ShowUpCell
+                        )
+                        toCells
+                        ++ model.board
+                , nextId = model.nextId + List.length toCells
               }
             , Cmd.none
             )
@@ -305,7 +322,7 @@ randomNum =
     Random.uniform 2 [ 4 ]
 
 
-randomCells : Int -> ( Int, Int ) -> Board -> Random.Generator (List Cell)
+randomCells : Int -> ( Int, Int ) -> Board -> Random.Generator (List (String -> Cell))
 randomCells n size board =
     let
         positionList =
@@ -317,7 +334,7 @@ randomCells n size board =
     Random.map2 (List.map2 Cell) positionList numList
 
 
-randomCell : ( Int, Int ) -> Board -> Random.Generator Cell
+randomCell : ( Int, Int ) -> Board -> Random.Generator (String -> Cell)
 randomCell size board =
     Random.map2 Cell (randomEmptyPosition size board) randomNum
 
@@ -376,17 +393,23 @@ viewBoard { size, board } =
             size
     in
     column
-        ([ Border.rounded 10
-         , Background.color <| rgb255 187 187 187
-         , width <| px <| w * 50 + (w - 1) * 5 + 20
-         , height <| px <| h * 50 + (h - 1) * 5 + 20
-         , padding 10
-         , spacing 5
-         ]
-            ++ List.map (viewAnimationCell >> inFront) board
-        )
+        [ Border.rounded 10
+        , Background.color <| rgb255 187 187 187
+        , width <| px <| w * 50 + (w - 1) * 5 + 20
+        , height <| px <| h * 50 + (h - 1) * 5 + 20
+        , padding 10
+        , spacing 5
+        , inFront <| viewAnimationCells board
+        ]
     <|
         viewEmptyCells size
+
+
+viewAnimationCells : List AnimationCell -> Element msg
+viewAnimationCells animationCells =
+    Keyed.column [] <|
+        List.map (\cell -> ( getCell cell |> .id, viewAnimationCell cell ))
+            animationCells
 
 
 viewAnimationCell : AnimationCell -> Element msg
@@ -394,22 +417,39 @@ viewAnimationCell animationCell =
     let
         cell =
             getCell animationCell
-
-        ( i, j ) =
-            cell.position
     in
-    el
-        [ moveRight <| toFloat <| i * 50 + i * 5 + 10
-        , moveDown <| toFloat <| j * 50 + j * 5 + 10
+    case animationCell of
+        ShowUpCell _ ->
+            lazy5 positionHelp "" "" "showup" cell.position cell.num
+
+        MoveCell _ position ->
+            lazy5 positionHelp "" "move" "" cell.position cell.num
+
+        MergeCell _ ( position, position2 ) ->
+            lazy5 positionHelp "" "merge" "" cell.position cell.num
+
+
+positionHelp : String -> String -> String -> Position -> Int -> Element msg
+positionHelp cls1 cls2 cls3 ( i, j ) num =
+    Keyed.el
+        [ inFront <|
+            Keyed.el
+                [ moveRight <| toFloat <| i * 50 + i * 5 + 10
+                , moveDown <| toFloat <| j * 50 + j * 5 + 10
+                , class cls2
+                ]
+            <|
+                ( "ss", lazy2 viewCell cls3 num )
+        , class cls1
         ]
-    <|
-        viewCell cell
+        ( "nn", none )
 
 
-viewCell : Cell -> Element msg
-viewCell { num } =
+viewCell : String -> Int -> Element msg
+viewCell cls num =
     column
-        [ width <| px 50
+        [ class cls
+        , width <| px 50
         , height <| px 50
         , Border.rounded 5
         , Font.size 24
@@ -499,6 +539,11 @@ viewScore score =
         text <|
             "Score: "
                 ++ String.fromInt score
+
+
+class : String -> Attribute msg
+class =
+    htmlAttribute << Html.Attributes.class
 
 
 

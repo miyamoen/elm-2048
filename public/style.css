@@ -1,0 +1,27 @@
+.showup {
+  animation-name: showup;
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.07, 0.965, 0.645, 1.085);
+  animation-delay: 0s;
+  animation-iteration-count: 1;
+  animation-direction: alternate;
+  animation-fill-mode: none;
+  transform-origin: center;
+}
+
+@keyframes showup {
+  0% {
+    transform: scale(0.3);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.move {
+  transition-property: transform;
+  transition-duration: 2s;
+  transition-delay: 0s;
+  transition-timing-function: ease;
+}

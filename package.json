@@ -1,0 +1,13 @@
+{
+  "name": "elm-2048",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miyamoen/elm-2048.git"
+  },
+  "scripts": {
+    "start": "elm-live src/Main.elm --open --start-page=index.html --dir=public -- --output=public/elm.js"
+  },
+  "dependencies": {
+    "elm-live": "^3.2.3"
+  }
+}
