@@ -58,8 +58,8 @@ type alias Cell =
 
 type AnimationCell
     = ShowUpCell Cell
-    | MoveCell Cell Position
-    | MergeCell Cell ( Position, Position )
+    | MoveCell Cell
+    | MergeCell Cell ( Cell, Cell )
 
 
 type alias Position =
@@ -165,22 +165,26 @@ accumulate : Cell -> List AnimationCell -> List AnimationCell
 accumulate cell cells =
     case cells of
         (MergeCell _ _) :: _ ->
-            MoveCell cell cell.position :: cells
+            MoveCell cell :: cells
 
-        (MoveCell nearest _) :: rest ->
+        (MoveCell nearest) :: rest ->
             if nearest.num == cell.num then
-                MergeCell { cell | num = cell.num * 2 }
-                    ( cell.position, nearest.position )
+                MergeCell
+                    { cell
+                        | num = cell.num * 2
+                        , id = cell.id ++ "_" ++ nearest.id
+                    }
+                    ( cell, nearest )
                     :: rest
 
             else
-                MoveCell cell cell.position :: cells
+                MoveCell cell :: cells
 
         (ShowUpCell _) :: _ ->
-            MoveCell cell cell.position :: cells
+            MoveCell cell :: cells
 
         [] ->
-            [ MoveCell cell cell.position ]
+            [ MoveCell cell ]
 
 
 slideBoard : ( Int, Int ) -> Direction -> Board -> Board
@@ -247,7 +251,7 @@ getCell animationCell =
         ShowUpCell cell ->
             cell
 
-        MoveCell cell _ ->
+        MoveCell cell ->
             cell
 
         MergeCell cell _ ->
@@ -260,8 +264,8 @@ replacePosition position animationCell =
         ShowUpCell cell ->
             ShowUpCell { cell | position = position }
 
-        MoveCell cell old ->
-            MoveCell { cell | position = position } old
+        MoveCell cell ->
+            MoveCell { cell | position = position }
 
         MergeCell cell olds ->
             MergeCell { cell | position = position } olds
@@ -319,7 +323,7 @@ randomPosition ( width, height ) =
 
 randomNum : Random.Generator Int
 randomNum =
-    Random.uniform 2 [ 4 ]
+    Random.uniform 2 [ 4, 2, 2 ]
 
 
 randomCells : Int -> ( Int, Int ) -> Board -> Random.Generator (List (String -> Cell))
@@ -400,48 +404,48 @@ viewBoard { size, board } =
         , padding 10
         ]
     <|
-        List.map (Tuple.mapSecond <| el [ width <| px 0, height <| px 0 ])
-            (viewEmptyCells size ++ viewAnimationCells board)
+        List.reverse <|
+            List.sortBy Tuple.first <|
+                List.map (Tuple.mapSecond <| el [ width <| px 0, height <| px 0 ])
+                    (viewEmptyCells size ++ viewAnimationCells board)
 
 
 viewAnimationCells : List AnimationCell -> List ( String, Element msg )
 viewAnimationCells animationCells =
-    List.map (\cell -> ( getCell cell |> .id, viewAnimationCell cell ))
-        animationCells
+    List.concatMap viewAnimationCell animationCells
 
 
-viewAnimationCell : AnimationCell -> Element msg
+viewAnimationCell : AnimationCell -> List ( String, Element msg )
 viewAnimationCell animationCell =
-    let
-        cell =
-            getCell animationCell
-    in
     case animationCell of
-        ShowUpCell _ ->
-            lazy4 positionHelp "" "showup" cell.position cell.num
+        ShowUpCell cell ->
+            [ ( cell.id, lazy4 positionHelp "" "showup" cell.position cell.num ) ]
 
-        MoveCell _ position ->
-            lazy4 positionHelp "move" "" cell.position cell.num
+        MoveCell cell ->
+            [ ( cell.id, lazy4 positionHelp "move" "" cell.position cell.num ) ]
 
-        MergeCell _ ( position, position2 ) ->
-            lazy4 positionHelp "merge" "" cell.position cell.num
+        MergeCell cell ( cell1, cell2 ) ->
+            [ ( cell.id, lazy4 positionHelp "merge" "showup" cell.position cell.num )
+            , ( cell1.id, lazy4 positionHelp "move" "shrink" cell.position cell1.num )
+            , ( cell2.id, lazy4 positionHelp "move" "shrink" cell.position cell2.num )
+            ]
 
 
 positionHelp : String -> String -> Position -> Int -> Element msg
-positionHelp cls2 cls3 ( i, j ) num =
+positionHelp moveClass cellClass ( i, j ) num =
     el
         [ moveRight <| toFloat <| i * 55
         , moveDown <| toFloat <| j * 55
-        , class "move"
+        , class moveClass
         ]
     <|
-        lazy2 viewCell cls3 num
+        lazy2 viewCell cellClass num
 
 
 viewCell : String -> Int -> Element msg
 viewCell cls num =
     column
-        [ class "showup"
+        [ class cls
         , width <| px 50
         , height <| px 50
         , Border.rounded 5
@@ -501,7 +505,7 @@ viewEmptyCells ( w, h ) =
                 List.range 0 (w - 1)
                     |> List.map
                         (\i ->
-                            ( String.fromInt i ++ "_" ++ String.fromInt j
+                            ( "empty" ++ String.fromInt i ++ "_" ++ String.fromInt j
                             , el
                                 [ width <| px 50
                                 , height <| px 50
