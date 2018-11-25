@@ -5,7 +5,8 @@
     "url": "git+https://github.com/miyamoen/elm-2048.git"
   },
   "scripts": {
-    "start": "elm-live src/Main.elm --open --start-page=index.html --dir=public -- --output=public/elm.js"
+    "start": "elm-live src/Main.elm --open --start-page=index.html --dir=public -- --output=public/elm.js",
+    "build": "elm make src/Main.elm --output=public/elm.js --optimize && elm-minify public/elm.js"
   },
   "dependencies": {
     "elm-live": "^3.2.3"
