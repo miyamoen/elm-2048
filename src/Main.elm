@@ -392,24 +392,22 @@ viewBoard { size, board } =
         ( w, h ) =
             size
     in
-    column
+    Keyed.column
         [ Border.rounded 10
         , Background.color <| rgb255 187 187 187
         , width <| px <| w * 50 + (w - 1) * 5 + 20
         , height <| px <| h * 50 + (h - 1) * 5 + 20
         , padding 10
-        , spacing 5
-        , inFront <| viewAnimationCells board
         ]
     <|
-        viewEmptyCells size
+        List.map (Tuple.mapSecond <| el [ width <| px 0, height <| px 0 ])
+            (viewEmptyCells size ++ viewAnimationCells board)
 
 
-viewAnimationCells : List AnimationCell -> Element msg
+viewAnimationCells : List AnimationCell -> List ( String, Element msg )
 viewAnimationCells animationCells =
-    Keyed.column [] <|
-        List.map (\cell -> ( getCell cell |> .id, viewAnimationCell cell ))
-            animationCells
+    List.map (\cell -> ( getCell cell |> .id, viewAnimationCell cell ))
+        animationCells
 
 
 viewAnimationCell : AnimationCell -> Element msg
@@ -420,35 +418,30 @@ viewAnimationCell animationCell =
     in
     case animationCell of
         ShowUpCell _ ->
-            lazy5 positionHelp "" "" "showup" cell.position cell.num
+            lazy4 positionHelp "" "showup" cell.position cell.num
 
         MoveCell _ position ->
-            lazy5 positionHelp "" "move" "" cell.position cell.num
+            lazy4 positionHelp "move" "" cell.position cell.num
 
         MergeCell _ ( position, position2 ) ->
-            lazy5 positionHelp "" "merge" "" cell.position cell.num
+            lazy4 positionHelp "merge" "" cell.position cell.num
 
 
-positionHelp : String -> String -> String -> Position -> Int -> Element msg
-positionHelp cls1 cls2 cls3 ( i, j ) num =
-    Keyed.el
-        [ inFront <|
-            Keyed.el
-                [ moveRight <| toFloat <| i * 50 + i * 5 + 10
-                , moveDown <| toFloat <| j * 50 + j * 5 + 10
-                , class cls2
-                ]
-            <|
-                ( "ss", lazy2 viewCell cls3 num )
-        , class cls1
+positionHelp : String -> String -> Position -> Int -> Element msg
+positionHelp cls2 cls3 ( i, j ) num =
+    el
+        [ moveRight <| toFloat <| i * 55
+        , moveDown <| toFloat <| j * 55
+        , class "move"
         ]
-        ( "nn", none )
+    <|
+        lazy2 viewCell cls3 num
 
 
 viewCell : String -> Int -> Element msg
 viewCell cls num =
     column
-        [ class cls
+        [ class "showup"
         , width <| px 50
         , height <| px 50
         , Border.rounded 5
@@ -500,18 +493,27 @@ viewCell cls num =
         [ el [ centerX, centerY ] <| text (String.fromInt num) ]
 
 
-viewEmptyCells : ( Int, Int ) -> List (Element msg)
+viewEmptyCells : ( Int, Int ) -> List ( String, Element msg )
 viewEmptyCells ( w, h ) =
-    List.repeat h <|
-        row [ spacing 5 ] <|
-            List.repeat w <|
-                el
-                    [ width <| px 50
-                    , height <| px 50
-                    , Border.rounded 5
-                    , Background.color <| rgb255 204 204 204
-                    ]
-                    none
+    List.range 0 (h - 1)
+        |> List.concatMap
+            (\j ->
+                List.range 0 (w - 1)
+                    |> List.map
+                        (\i ->
+                            ( String.fromInt i ++ "_" ++ String.fromInt j
+                            , el
+                                [ width <| px 50
+                                , height <| px 50
+                                , Border.rounded 5
+                                , Background.color <| rgb255 204 204 204
+                                , moveRight <| toFloat <| i * 55
+                                , moveDown <| toFloat <| j * 55
+                                ]
+                                none
+                            )
+                        )
+            )
 
 
 viewResult : GameState -> Element msg
